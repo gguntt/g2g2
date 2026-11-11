@@ -1182,17 +1182,180 @@ body {
 /* ==========================================================================
    Responsive Adaptations
    ========================================================================== */
-@media (max-width: 480px) {
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+.calculator-view.active {
+  min-height: 0;
+}
+
+.keypad-wrapper {
+  min-height: 0;
+}
+
+.standard-keypad {
+  grid-auto-rows: 1fr;
+  min-height: 0;
+}
+
+.standard-keypad .calc-btn {
+  height: 100%;
+  min-height: 44px;
+}
+
+.currency-view.active,
+.unit-view.active {
+  justify-content: flex-start;
+}
+
+.currency-view .currency-keypad,
+.unit-view .currency-keypad {
+  margin-top: 8px;
+  flex: 0 0 auto;
+}
+
+.multi-currency-section,
+.multi-unit-section {
+  flex: 0 0 auto;
+}
+
+.currency-input-field,
+.unit-input-field,
+.currency-select,
+.unit-select {
+  font-size: 16px;
+}
+
+.aux-rate-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.rate-fetch-error {
+  margin: 4px 0 0;
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.rate-date-tag {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+@media (max-width: 679px) {
   body {
-    padding: 0;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    min-height: 100dvh;
+    height: 100dvh;
+    align-items: stretch;
   }
-  .calculator-app {
+
+  .calculator-app,
+  .calculator-app.mode-scientific,
+  .calculator-app.mode-currency,
+  .calculator-app.mode-unit {
     max-width: 100%;
-    min-height: 100vh;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
     border-radius: 0;
     border: none;
+    box-shadow: none;
   }
+
+  .main-content {
+    min-height: 0;
+  }
+
   .current-value {
-    font-size: 32px;
+    font-size: clamp(28px, 8vw, 42px);
+    overflow-wrap: anywhere;
+  }
+
+  .calc-btn {
+    font-size: clamp(15px, 4.2vw, 20px);
+  }
+
+  .rate-type-chips {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .type-chip {
+    grid-column: span 2;
+    min-height: 40px;
+    font-size: 13px;
+    padding: 8px 6px;
+  }
+
+  .type-chip[data-type="remitSend"],
+  .type-chip[data-type="remitRecv"] {
+    grid-column: span 3;
+  }
+
+  .discount-preset-chips {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 6px;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .disc-chip {
+    flex: 0 0 auto;
+    min-width: 48px;
+    min-height: 40px;
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+
+  .currency-select,
+  .unit-select {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .currency-input-field,
+  .unit-input-field {
+    min-height: 44px;
+    font-size: 22px;
+  }
+
+  .bank-tab,
+  .bank-direct-link,
+  .unit-cat-tab,
+  .swap-btn {
+    min-height: 44px;
+  }
+
+  .unit-category-tabs {
+    gap: 6px;
+  }
+}
+
+@media (max-width: 379px) {
+  .calc-btn {
+    font-size: clamp(14px, 4.6vw, 18px);
+  }
+
+  .type-chip {
+    font-size: 12px;
+  }
+}
+
+@media (min-width: 680px) {
+  .calculator-app {
+    margin-inline: auto;
   }
 }

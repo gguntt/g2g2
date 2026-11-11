@@ -55,6 +55,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     },
 
+    rateSource: 'snapshot',
+    rateUpdatedAt: Date.parse('2026-09-15T00:00:00+09:00'),
+    rateFetchedAt: null,
+    rateLoadFailed: false,
+
     currencyMeta: {
       USD: { symbol: '$', name: '미국 달러', country: '미국', flag: '🇺🇸', decimals: 2 },
       EUR: { symbol: '€', name: '유럽 유로', country: '유럽', flag: '🇪🇺', decimals: 2 },
@@ -218,6 +223,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const toCurrencyUnit = document.getElementById('toCurrencyUnit');
   const exchangeRateDetail = document.getElementById('exchangeRateDetail');
   const multiCurrencyGrid = document.getElementById('multiCurrencyGrid');
+  const rateDateText = document.getElementById('rateDateText');
+  const auxRateTag = document.getElementById('auxRateTag');
+  const rateError = document.getElementById('rateError');
+  const drawerRateBasis = document.getElementById('drawerRateBasis');
+  const RATE_CACHE_KEY = 'g2g2-fx-bank-v2';
+  const RATE_TYPES = ['base', 'cashBuy', 'cashSell', 'remitSend', 'remitRecv'];
+  const SNAPSHOT_RATES = JSON.parse(JSON.stringify({
+    hana: state.bankRates.hana.rates,
+    shinhan: state.bankRates.shinhan.rates
+  }));
 
   // Unit Converter Controls
   const unitCatTabs = document.querySelectorAll('.unit-cat-tab');
@@ -736,7 +751,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const bankData = state.bankRates[bank].rates[currencyCode];
     const baseRate = bankData.base;
-    const targetTypeRate = bankData[type];
+    const targetTypeRate = bankData[type] ?? bankData.base;
 
     if (type === 'base' || discount === 0) {
       return targetTypeRate;
@@ -1280,7 +1295,144 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  function formatSeoulStamp(timestamp) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23'
+    }).formatToParts(new Date(timestamp));
+    const pick = (type) => parts.find((part) => part.type === type).value;
+    return {
+      date: `${pick('year')}.${pick('month')}.${pick('day')}`,
+      time: `${pick('hour')}:${pick('minute')}`
+    };
+  }
+
+  function paintRateLabel() {
+    const updated = formatSeoulStamp(state.rateUpdatedAt);
+    const checked = formatSeoulStamp(state.rateFetchedAt || Date.now());
+    const label = `${updated.date} ${updated.time} 기준 (하루 1회 갱신) · ${checked.time} 확인`;
+    rateDateText.textContent = label;
+    drawerRateBasis.textContent = label;
+    auxRateTag.hidden = state.rateSource !== 'backup';
+    rateError.hidden = !state.rateLoadFailed;
+  }
+
+  function applyLiveMids(liveMids) {
+    ['hana', 'shinhan'].forEach((bank) => {
+      ['USD', 'EUR', 'JPY'].forEach((code) => {
+        const snap = SNAPSHOT_RATES[bank][code];
+        const avgBase = (SNAPSHOT_RATES.hana[code].base + SNAPSHOT_RATES.shinhan[code].base) / 2;
+        const newBase = liveMids[code] * (snap.base / avgBase);
+        const next = {};
+        RATE_TYPES.forEach((type) => {
+          next[type] = newBase * (snap[type] / snap.base);
+        });
+        state.bankRates[bank].rates[code] = next;
+      });
+    });
+  }
+
+  function restoreSnapshotRates() {
+    state.bankRates.hana.rates = JSON.parse(JSON.stringify(SNAPSHOT_RATES.hana));
+    state.bankRates.shinhan.rates = JSON.parse(JSON.stringify(SNAPSHOT_RATES.shinhan));
+  }
+
+  function readRateCache() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(RATE_CACHE_KEY) || 'null');
+      if (!saved || !saved.mids || !saved.updatedAt) return null;
+      if (!(saved.mids.USD > 0 && saved.mids.EUR > 0 && saved.mids.JPY > 0)) return null;
+      return saved;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async function fetchJson(url) {
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) throw new Error(String(response.status));
+    return response.json();
+  }
+
+  async function fetchLiveMids() {
+    try {
+      const data = await fetchJson('https://open.er-api.com/v6/latest/USD');
+      const table = data.rates;
+      if (data.result !== 'success' || !(table && table.KRW > 0 && table.EUR > 0 && table.JPY > 0)) {
+        throw new Error('incomplete');
+      }
+      return {
+        source: 'primary',
+        updatedAt: data.time_last_update_unix * 1000,
+        mids: {
+          USD: table.KRW,
+          EUR: table.KRW / table.EUR,
+          JPY: table.KRW / table.JPY
+        }
+      };
+    } catch (primaryError) {
+      const data = await fetchJson('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json');
+      const usd = data.usd;
+      if (!usd || !(usd.krw > 0 && usd.eur > 0 && usd.jpy > 0)) throw new Error('incomplete');
+      return {
+        source: 'backup',
+        updatedAt: Date.parse(`${data.date}T00:00:00Z`),
+        mids: {
+          USD: usd.krw,
+          EUR: usd.krw / usd.eur,
+          JPY: usd.krw / usd.jpy
+        }
+      };
+    }
+  }
+
+  function useRates(payload, failed) {
+    applyLiveMids(payload.mids);
+    state.rateSource = payload.source;
+    state.rateUpdatedAt = payload.updatedAt;
+    state.rateFetchedAt = payload.fetchedAt || Date.now();
+    state.rateLoadFailed = failed;
+    paintRateLabel();
+    try {
+      localStorage.setItem(RATE_CACHE_KEY, JSON.stringify({
+        source: payload.source,
+        updatedAt: payload.updatedAt,
+        fetchedAt: state.rateFetchedAt,
+        mids: payload.mids
+      }));
+    } catch (error) {
+      /* 저장이 막혀도 이번 화면의 계산은 계속한다. */
+    }
+    updateCurrencyConverter();
+  }
+
+  async function loadRates() {
+    try {
+      const fresh = await fetchLiveMids();
+      useRates(fresh, false);
+    } catch (error) {
+      const cached = readRateCache();
+      if (cached) {
+        useRates(cached, true);
+      } else {
+        restoreSnapshotRates();
+        state.rateSource = 'snapshot';
+        state.rateUpdatedAt = Date.parse('2026-09-15T00:00:00+09:00');
+        state.rateFetchedAt = Date.now();
+        state.rateLoadFailed = true;
+        paintRateLabel();
+        updateCurrencyConverter();
+      }
+    }
+  }
+
   // 초기 렌더링
   updateDisplay();
   updateCurrencyConverter();
+  loadRates();
 });
