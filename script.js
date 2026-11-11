@@ -22,6 +22,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Currency Converter State (2026.09.15 기준)
     currencyInput: 10000,
+    currencyTyped: null,
+    unitTyped: null,
     activeCurrencySource: 'from',
     fromCurrency: 'KRW',
     toCurrency: 'USD',
@@ -225,9 +227,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const multiCurrencyGrid = document.getElementById('multiCurrencyGrid');
   const rateDateText = document.getElementById('rateDateText');
   const auxRateTag = document.getElementById('auxRateTag');
+  const shinhanHint = document.getElementById('shinhanHint');
   const rateError = document.getElementById('rateError');
   const drawerRateBasis = document.getElementById('drawerRateBasis');
-  const RATE_CACHE_KEY = 'g2g2-fx-bank-v2';
+  const rateRefreshBtn = document.getElementById('rateRefreshBtn');
+  const RATE_CACHE_KEY = 'g2g2-fx-hana-v3';
   const RATE_TYPES = ['base', 'cashBuy', 'cashSell', 'remitSend', 'remitRecv'];
   const SNAPSHOT_RATES = JSON.parse(JSON.stringify({
     hana: state.bankRates.hana.rates,
@@ -348,13 +352,21 @@ document.addEventListener('DOMContentLoaded', () => {
       state.isEvaluated = false;
     }
 
-    if (state.currentDisplay === '0' && digit !== '.') {
-      state.currentDisplay = String(digit);
+    const digitText = String(digit);
+    if (state.currentDisplay === '0' && digitText !== '.') {
+      state.currentDisplay = digitText;
+      if (state.expression === '' || state.expression === '0') {
+        state.expression = digitText;
+      } else if (/[+\-*/(]0$/.test(state.expression)) {
+        state.expression = state.expression.slice(0, -1) + digitText;
+      } else {
+        state.expression += digitText;
+      }
     } else {
-      state.currentDisplay += String(digit);
+      state.currentDisplay += digitText;
+      state.expression += digitText;
     }
 
-    state.expression += String(digit);
     updateDisplay();
   }
 
@@ -778,10 +790,16 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function formatCurrencyDisplay(val, code) {
+    if (!isFinite(val)) return '—';
     const decimals = state.currencyMeta[code].decimals;
-    return val.toLocaleString('ko-KR', {
-      minimumFractionDigits: decimals,
-      maximumFractionDigits: decimals
+    if (decimals === 0) {
+      return Math.round(val).toLocaleString('ko-KR');
+    }
+    const rounded = Math.round(val * 100) / 100;
+    const fractionDigits = Number.isInteger(rounded) ? 0 : 2;
+    return rounded.toLocaleString('ko-KR', {
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: 2
     });
   }
 
@@ -821,7 +839,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const convertedToVal = convertBankCurrency(rawFromVal, fromCode, toCode);
 
     if (document.activeElement !== fromCurrencyInput) {
-      fromCurrencyInput.value = formatCurrencyDisplay(rawFromVal, fromCode);
+      fromCurrencyInput.value = (state.activeCurrencySource === 'from' && state.currencyTyped)
+        ? formatTypedAmount(state.currencyTyped, fromCode)
+        : formatCurrencyDisplay(rawFromVal, fromCode);
     }
     if (document.activeElement !== toCurrencyInput) {
       toCurrencyInput.value = formatCurrencyDisplay(convertedToVal, toCode);
@@ -832,9 +852,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const singleRate = convertBankCurrency(1, fromCode, toCode);
     const inverseRate = convertBankCurrency(1, toCode, fromCode);
-    const singleDec = toMeta.decimals > 0 ? toMeta.decimals : 2;
-    const invDec = fromMeta.decimals > 0 ? fromMeta.decimals : 2;
-    exchangeRateDetail.textContent = `1 ${fromCode} = ${singleRate.toFixed(singleDec)} ${toCode} · 1 ${toCode} = ${inverseRate.toFixed(invDec)} ${fromCode}`;
+    exchangeRateDetail.textContent = `1 ${fromCode} = ${formatCurrencyDisplay(singleRate, toCode)} ${toCode} · 1 ${toCode} = ${formatCurrencyDisplay(inverseRate, fromCode)} ${fromCode}`;
 
     renderMultiCurrencyGrid(rawFromVal, fromCode);
   }
@@ -880,6 +898,37 @@ document.addEventListener('DOMContentLoaded', () => {
     return isNaN(num) ? 0 : num;
   }
 
+  function isPlainZero(str) {
+    return /^0+$/.test(String(str).replace(/,/g, '').trim());
+  }
+
+  function formatTypedAmount(typed, code) {
+    if (String(typed).endsWith('.')) {
+      return `${formatCurrencyDisplay(parseInputNumber(typed), code)}.`;
+    }
+    return formatCurrencyDisplay(parseInputNumber(typed), code);
+  }
+
+  function appendNumericToken(currentStr, token) {
+    const raw = String(currentStr).replace(/,/g, '');
+    if (token === '.') {
+      if (raw.includes('.')) return raw;
+      return isPlainZero(raw) || raw === '' ? '0.' : `${raw}.`;
+    }
+    if ((isPlainZero(raw) || raw === '') && token !== '.') {
+      return token === '00' ? '0' : String(Number(token));
+    }
+    if (raw.length >= 14) return raw;
+    return `${raw}${token}`;
+  }
+
+  function prepareZeroField(input) {
+    const raw = String(input.value).replace(/,/g, '').trim();
+    if (raw === '' || raw === '.' || Number(raw) === 0) {
+      input.value = '';
+    }
+  }
+
   fromCurrencyInput.addEventListener('input', (e) => {
     state.activeCurrencySource = 'from';
     fromCurrencyCard.classList.add('active-source');
@@ -887,6 +936,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const val = parseInputNumber(e.target.value);
     state.currencyInput = val;
+    state.currencyTyped = e.target.value.replace(/,/g, '') || '0';
     updateCurrencyConverter();
   });
 
@@ -894,6 +944,11 @@ document.addEventListener('DOMContentLoaded', () => {
     state.activeCurrencySource = 'from';
     fromCurrencyCard.classList.add('active-source');
     toCurrencyCard.classList.remove('active-source');
+    prepareZeroField(fromCurrencyInput);
+  });
+
+  fromCurrencyInput.addEventListener('keydown', (e) => {
+    if (e.key === '.' && fromCurrencyInput.value === '') fromCurrencyInput.value = '0';
   });
 
   toCurrencyInput.addEventListener('input', (e) => {
@@ -904,6 +959,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const toVal = parseInputNumber(e.target.value);
     const calculatedFrom = convertBankCurrency(toVal, state.toCurrency, state.fromCurrency);
     state.currencyInput = calculatedFrom;
+    state.currencyTyped = null;
     updateCurrencyConverter();
   });
 
@@ -911,6 +967,11 @@ document.addEventListener('DOMContentLoaded', () => {
     state.activeCurrencySource = 'to';
     toCurrencyCard.classList.add('active-source');
     fromCurrencyCard.classList.remove('active-source');
+    prepareZeroField(toCurrencyInput);
+  });
+
+  toCurrencyInput.addEventListener('keydown', (e) => {
+    if (e.key === '.' && toCurrencyInput.value === '') toCurrencyInput.value = '0';
   });
 
   bankTabs.forEach(tab => {
@@ -918,6 +979,7 @@ document.addEventListener('DOMContentLoaded', () => {
       bankTabs.forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
       state.selectedBank = tab.dataset.bank;
+      paintRateLabel();
       updateCurrencyConverter();
     });
   });
@@ -973,14 +1035,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.querySelectorAll('.currency-keypad button[data-cval]').forEach(btn => {
     btn.addEventListener('click', () => {
-      const val = btn.dataset.cval;
-      let currentStr = String(state.currencyInput);
-      if (currentStr === '0' && val !== '.') {
-        currentStr = val;
-      } else {
-        if (val === '.' && currentStr.includes('.')) return;
-        if (currentStr.length < 14) currentStr += val;
-      }
+      const seed = state.currencyTyped ?? (state.currencyInput === 0 ? '0' : String(state.currencyInput));
+      const currentStr = appendNumericToken(seed, btn.dataset.cval);
+      state.currencyTyped = currentStr;
       state.currencyInput = parseInputNumber(currentStr);
       updateCurrencyConverter();
     });
@@ -988,18 +1045,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('currBtnCE').addEventListener('click', () => {
     state.currencyInput = 0;
+    state.currencyTyped = '0';
     updateCurrencyConverter();
   });
 
   document.getElementById('currBtnClear').addEventListener('click', () => {
     state.currencyInput = 0;
+    state.currencyTyped = '0';
     updateCurrencyConverter();
   });
 
   document.getElementById('currBtnBack').addEventListener('click', () => {
-    let currentStr = String(state.currencyInput);
-    if (currentStr.length > 1) currentStr = currentStr.slice(0, -1);
-    else currentStr = '0';
+    let currentStr = state.currencyTyped ?? String(state.currencyInput);
+    currentStr = currentStr.length > 1 ? currentStr.slice(0, -1) : '0';
+    state.currencyTyped = currentStr;
     state.currencyInput = parseInputNumber(currentStr);
     updateCurrencyConverter();
   });
@@ -1101,7 +1160,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const convertedToVal = convertUnits(rawFromVal, fromKey, toKey, catKey);
 
     if (document.activeElement !== fromUnitInput) {
-      fromUnitInput.value = formatUnitNumber(rawFromVal);
+      fromUnitInput.value = (state.activeUnitSource === 'from' && state.unitTyped && String(state.unitTyped).endsWith('.'))
+        ? `${formatUnitNumber(parseInputNumber(state.unitTyped))}.`
+        : formatUnitNumber(rawFromVal);
     }
     if (document.activeElement !== toUnitInput) {
       toUnitInput.value = formatUnitNumber(convertedToVal);
@@ -1187,6 +1248,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const val = parseInputNumber(e.target.value);
     state.unitInputVal = val;
+    state.unitTyped = e.target.value.replace(/,/g, '') || '0';
     updateUnitConverter();
   });
 
@@ -1194,6 +1256,11 @@ document.addEventListener('DOMContentLoaded', () => {
     state.activeUnitSource = 'from';
     fromUnitCard.classList.add('active-source');
     toUnitCard.classList.remove('active-source');
+    prepareZeroField(fromUnitInput);
+  });
+
+  fromUnitInput.addEventListener('keydown', (e) => {
+    if (e.key === '.' && fromUnitInput.value === '') fromUnitInput.value = '0';
   });
 
   toUnitInput.addEventListener('input', (e) => {
@@ -1204,6 +1271,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const toVal = parseInputNumber(e.target.value);
     const calculatedFrom = convertUnits(toVal, state.toUnit, state.fromUnit, state.unitCategory);
     state.unitInputVal = calculatedFrom;
+    state.unitTyped = null;
     updateUnitConverter();
   });
 
@@ -1211,26 +1279,28 @@ document.addEventListener('DOMContentLoaded', () => {
     state.activeUnitSource = 'to';
     toUnitCard.classList.add('active-source');
     fromUnitCard.classList.remove('active-source');
+    prepareZeroField(toUnitInput);
+  });
+
+  toUnitInput.addEventListener('keydown', (e) => {
+    if (e.key === '.' && toUnitInput.value === '') toUnitInput.value = '0';
   });
 
   // 단위 전용 키패드
   document.querySelectorAll('.unit-view .currency-keypad button[data-uval]').forEach(btn => {
     btn.addEventListener('click', () => {
       const val = btn.dataset.uval;
-      let currentStr = String(state.unitInputVal);
 
       if (val === 'neg') {
         state.unitInputVal = -state.unitInputVal;
+        state.unitTyped = String(state.unitInputVal);
         updateUnitConverter();
         return;
       }
 
-      if (currentStr === '0' && val !== '.') {
-        currentStr = val;
-      } else {
-        if (val === '.' && currentStr.includes('.')) return;
-        if (currentStr.length < 14) currentStr += val;
-      }
+      const seed = state.unitTyped ?? (state.unitInputVal === 0 ? '0' : String(state.unitInputVal));
+      const currentStr = appendNumericToken(seed, val);
+      state.unitTyped = currentStr;
       state.unitInputVal = parseInputNumber(currentStr);
       updateUnitConverter();
     });
@@ -1238,18 +1308,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('unitBtnCE').addEventListener('click', () => {
     state.unitInputVal = 0;
+    state.unitTyped = '0';
     updateUnitConverter();
   });
 
   document.getElementById('unitBtnClear').addEventListener('click', () => {
     state.unitInputVal = 0;
+    state.unitTyped = '0';
     updateUnitConverter();
   });
 
   document.getElementById('unitBtnBack').addEventListener('click', () => {
-    let currentStr = String(state.unitInputVal);
-    if (currentStr.length > 1) currentStr = currentStr.slice(0, -1);
-    else currentStr = '0';
+    let currentStr = state.unitTyped ?? String(state.unitInputVal);
+    currentStr = currentStr.length > 1 ? currentStr.slice(0, -1) : '0';
+    state.unitTyped = currentStr;
     state.unitInputVal = parseInputNumber(currentStr);
     updateUnitConverter();
   });
@@ -1315,11 +1387,26 @@ document.addEventListener('DOMContentLoaded', () => {
   function paintRateLabel() {
     const updated = formatSeoulStamp(state.rateUpdatedAt);
     const checked = formatSeoulStamp(state.rateFetchedAt || Date.now());
-    const label = `${updated.date} ${updated.time} 기준 (하루 1회 갱신) · ${checked.time} 확인`;
+    const prefix = state.rateSource === 'backup' ? '보조 환율' : '하나은행 고시';
+    const label = `${prefix} ${updated.date} ${updated.time} · ${checked.time} 확인`;
     rateDateText.textContent = label;
     drawerRateBasis.textContent = label;
     auxRateTag.hidden = state.rateSource !== 'backup';
+    shinhanHint.hidden = !(state.selectedBank === 'shinhan' && state.rateSource === 'hana');
     rateError.hidden = !state.rateLoadFailed;
+  }
+
+  function applyShinhanFromHana(hanaRates) {
+    ['USD', 'EUR', 'JPY'].forEach((code) => {
+      state.bankRates.hana.rates[code] = { ...hanaRates[code] };
+      const hanaBase = hanaRates[code].base;
+      const snap = SNAPSHOT_RATES.shinhan[code];
+      const next = {};
+      RATE_TYPES.forEach((type) => {
+        next[type] = hanaBase * (snap[type] / snap.base);
+      });
+      state.bankRates.shinhan.rates[code] = next;
+    });
   }
 
   function applyLiveMids(liveMids) {
@@ -1345,9 +1432,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function readRateCache() {
     try {
       const saved = JSON.parse(localStorage.getItem(RATE_CACHE_KEY) || 'null');
-      if (!saved || !saved.mids || !saved.updatedAt) return null;
-      if (!(saved.mids.USD > 0 && saved.mids.EUR > 0 && saved.mids.JPY > 0)) return null;
-      return saved;
+      if (!saved || !saved.updatedAt) return null;
+      if (saved.source === 'hana' && saved.hanaRates?.USD?.base > 0) return saved;
+      if (saved.source === 'backup' && saved.mids?.USD > 0) return saved;
+      return null;
     } catch (error) {
       return null;
     }
@@ -1359,6 +1447,46 @@ document.addEventListener('DOMContentLoaded', () => {
     return response.json();
   }
 
+  function parseDunamuStamp(item) {
+    if (item.timestamp) return Number(item.timestamp);
+    const date = String(item.date || '').replace(/-/g, '');
+    const time = String(item.time || '000000').padStart(6, '0');
+    if (date.length >= 8) {
+      return Date.parse(`${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4, 6)}+09:00`);
+    }
+    return Date.now();
+  }
+
+  function rowFromDunamu(item) {
+    const code = String(item.currencyCode || item.code || '').replace('FRX.KRW', '');
+    const factor = code === 'JPY' ? 100 : 1;
+    const row = {
+      base: Number(item.basePrice) / factor,
+      cashBuy: Number(item.cashBuyingPrice) / factor,
+      cashSell: Number(item.cashSellingPrice) / factor,
+      remitSend: Number(item.ttSellingPrice) / factor,
+      remitRecv: Number(item.ttBuyingPrice) / factor
+    };
+    if (!(row.base > 0 && row.cashBuy > 0 && row.cashSell > 0 && row.remitSend > 0 && row.remitRecv > 0)) {
+      throw new Error('incomplete-row');
+    }
+    return { code, row, updatedAt: parseDunamuStamp(item) };
+  }
+
+  async function fetchHanaQuoted() {
+    const data = await fetchJson('https://quotation-api-cdn.dunamu.com/v1/forex/recent?codes=FRX.KRWUSD,FRX.KRWEUR,FRX.KRWJPY');
+    if (!Array.isArray(data) || data.length < 3) throw new Error('incomplete');
+    const hanaRates = {};
+    let updatedAt = 0;
+    data.forEach((item) => {
+      const parsed = rowFromDunamu(item);
+      hanaRates[parsed.code] = parsed.row;
+      updatedAt = Math.max(updatedAt, parsed.updatedAt || 0);
+    });
+    if (!(hanaRates.USD && hanaRates.EUR && hanaRates.JPY)) throw new Error('incomplete');
+    return { source: 'hana', updatedAt, hanaRates };
+  }
+
   async function fetchLiveMids() {
     try {
       const data = await fetchJson('https://open.er-api.com/v6/latest/USD');
@@ -1367,7 +1495,7 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error('incomplete');
       }
       return {
-        source: 'primary',
+        source: 'backup',
         updatedAt: data.time_last_update_unix * 1000,
         mids: {
           USD: table.KRW,
@@ -1391,45 +1519,70 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function useRates(payload, failed) {
-    applyLiveMids(payload.mids);
+  function applyPayload(payload) {
+    if (payload.source === 'hana') applyShinhanFromHana(payload.hanaRates);
+    else applyLiveMids(payload.mids);
     state.rateSource = payload.source;
     state.rateUpdatedAt = payload.updatedAt;
-    state.rateFetchedAt = payload.fetchedAt || Date.now();
-    state.rateLoadFailed = failed;
+    state.rateFetchedAt = Date.now();
     paintRateLabel();
+    updateCurrencyConverter();
+  }
+
+  function saveRateCache(payload) {
     try {
       localStorage.setItem(RATE_CACHE_KEY, JSON.stringify({
         source: payload.source,
         updatedAt: payload.updatedAt,
         fetchedAt: state.rateFetchedAt,
-        mids: payload.mids
+        hanaRates: payload.hanaRates || null,
+        mids: payload.mids || null
       }));
     } catch (error) {
       /* 저장이 막혀도 이번 화면의 계산은 계속한다. */
     }
-    updateCurrencyConverter();
   }
 
+  let rateInFlight = null;
   async function loadRates() {
-    try {
-      const fresh = await fetchLiveMids();
-      useRates(fresh, false);
-    } catch (error) {
-      const cached = readRateCache();
-      if (cached) {
-        useRates(cached, true);
-      } else {
-        restoreSnapshotRates();
-        state.rateSource = 'snapshot';
-        state.rateUpdatedAt = Date.parse('2026-09-15T00:00:00+09:00');
-        state.rateFetchedAt = Date.now();
-        state.rateLoadFailed = true;
-        paintRateLabel();
-        updateCurrencyConverter();
+    if (rateInFlight) return rateInFlight;
+    rateRefreshBtn.classList.add('spinning');
+    rateRefreshBtn.disabled = true;
+    rateInFlight = (async () => {
+      try {
+        let payload;
+        try {
+          payload = await fetchHanaQuoted();
+        } catch (hanaError) {
+          payload = await fetchLiveMids();
+        }
+        state.rateLoadFailed = false;
+        applyPayload(payload);
+        saveRateCache(payload);
+      } catch (error) {
+        const cached = readRateCache();
+        if (cached) {
+          state.rateLoadFailed = true;
+          applyPayload(cached);
+        } else {
+          restoreSnapshotRates();
+          state.rateSource = 'snapshot';
+          state.rateUpdatedAt = Date.parse('2026-09-15T00:00:00+09:00');
+          state.rateFetchedAt = Date.now();
+          state.rateLoadFailed = true;
+          paintRateLabel();
+          updateCurrencyConverter();
+        }
+      } finally {
+        rateRefreshBtn.classList.remove('spinning');
+        rateRefreshBtn.disabled = false;
+        rateInFlight = null;
       }
-    }
+    })();
+    return rateInFlight;
   }
+
+  rateRefreshBtn.addEventListener('click', () => loadRates());
 
   // 초기 렌더링
   updateDisplay();
