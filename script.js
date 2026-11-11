@@ -1,7 +1,8 @@
 /**
- * Windows 11 Calculator, live exchange rates & 5-category unit converter.
- * Rates are loaded from a free keyless API when the page opens.
- * 단위 변환: 길이, 넓이, 무게, 부피, 온도
+ * Windows 11 Calculator, Bank Exchange Rate & 5-Category Unit Converter
+ * 2026년 9월 15일 고시 기준
+ * 은행: 하나은행 (https://www.kebhana.com/cybrexh/index.do) / 신한은행 (https://m.shinhan.com/rib/mnew/index.jsp#250ER0130003)
+ * 단위 변환: 길이, 넓이, 무게, 부피, 온도 (네이버 단위변환 스타일 전체 비교)
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -19,13 +20,40 @@ document.addEventListener('DOMContentLoaded', () => {
     angleMode: 'DEG',
     historyList: [],
 
+    // Currency Converter State (2026.09.15 기준)
     currencyInput: 10000,
     activeCurrencySource: 'from',
     fromCurrency: 'KRW',
     toCurrency: 'USD',
-    liveRates: null,
-    rateUpdatedAt: null,
-    rateIsStale: false,
+    selectedBank: 'hana',
+    selectedRateType: 'base',
+    discountRate: 90,
+
+    // 2026년 9월 15일 은행별 상세 고시 환율 및 정확한 직결 링크
+    bankRates: {
+      hana: {
+        name: '하나은행',
+        linkName: "하나은행 '환전지갑' 외화구매 바로가기",
+        linkUrl: 'https://www.kebhana.com/cybrexh/index.do',
+        rates: {
+          USD: { base: 1385.00, cashBuy: 1409.23, cashSell: 1360.77, remitSend: 1398.50, remitRecv: 1371.50 },
+          EUR: { base: 1515.20, cashBuy: 1545.50, cashSell: 1484.90, remitSend: 1530.35, remitRecv: 1500.05 },
+          JPY: { base: 9.7190,  cashBuy: 9.8890,  cashSell: 9.5490,  remitSend: 9.8142,  remitRecv: 9.6238 },
+          KRW: { base: 1.0,     cashBuy: 1.0,     cashSell: 1.0,     remitSend: 1.0,     remitRecv: 1.0 }
+        }
+      },
+      shinhan: {
+        name: '신한은행',
+        linkName: "신한은행 'SOL 환전' 외화구매 바로가기",
+        linkUrl: 'https://m.shinhan.com/rib/mnew/index.jsp#250ER0130003',
+        rates: {
+          USD: { base: 1386.50, cashBuy: 1410.75, cashSell: 1362.25, remitSend: 1400.00, remitRecv: 1373.00 },
+          EUR: { base: 1516.80, cashBuy: 1547.13, cashSell: 1486.47, remitSend: 1531.96, remitRecv: 1501.64 },
+          JPY: { base: 9.7280,  cashBuy: 9.8982,  cashSell: 9.5578,  remitSend: 9.8232,  remitRecv: 9.6328 },
+          KRW: { base: 1.0,     cashBuy: 1.0,     cashSell: 1.0,     remitSend: 1.0,     remitRecv: 1.0 }
+        }
+      }
+    },
 
     currencyMeta: {
       USD: { symbol: '$', name: '미국 달러', country: '미국', flag: '🇺🇸', decimals: 2 },
@@ -165,14 +193,17 @@ document.addEventListener('DOMContentLoaded', () => {
   const historyListEl = document.getElementById('historyList');
   const clearHistoryBtn = document.getElementById('clearHistoryBtn');
 
-  const tabCalculator = document.getElementById('tabCalculator');
-  const tabCurrency = document.getElementById('tabCurrency');
-  const rateBasis = document.getElementById('rateBasis');
-  const rateError = document.getElementById('rateError');
-  const rateRefreshBtn = document.getElementById('rateRefreshBtn');
-  const drawerRateBasis = document.getElementById('drawerRateBasis');
-  let lastCalcMode = 'standard';
-  const RATE_CACHE_KEY = 'g2g2-fx-v1';
+  // Currency Converter Controls
+  const bankTabs = document.querySelectorAll('.bank-tab');
+  const bankDirectLink = document.getElementById('bankDirectLink');
+  const bankDirectTitle = document.getElementById('bankDirectTitle');
+
+  const typeChips = document.querySelectorAll('.type-chip');
+  const discChips = document.querySelectorAll('.disc-chip');
+  const discountSlider = document.getElementById('discountSlider');
+  const discountBadge = document.getElementById('discountBadge');
+  const discountSaveInfo = document.getElementById('discountSaveInfo');
+  const selectedRateSummary = document.getElementById('selectedRateSummary');
 
   const fromCurrencyCard = document.getElementById('fromCurrencyCard');
   const toCurrencyCard = document.getElementById('toCurrencyCard');
@@ -208,18 +239,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
   // 3. 모드 전환 로직
   // =========================================================================
-  function syncTabs() {
-    const onCurrency = state.mode === 'currency';
-    const onCalc = state.mode === 'standard' || state.mode === 'scientific';
-    tabCalculator.classList.toggle('active', onCalc);
-    tabCurrency.classList.toggle('active', onCurrency);
-    tabCalculator.setAttribute('aria-selected', String(onCalc));
-    tabCurrency.setAttribute('aria-selected', String(onCurrency));
-  }
-
   function switchMode(newMode) {
     state.mode = newMode;
-    if (newMode === 'standard' || newMode === 'scientific') lastCalcMode = newMode;
     drawerItems.forEach(item => {
       item.classList.toggle('active', item.dataset.mode === newMode);
     });
@@ -238,7 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
       app.classList.add('mode-scientific');
       calcView.classList.add('active');
     } else if (newMode === 'currency') {
-      currentModeTitle.textContent = '환율';
+      currentModeTitle.textContent = '환율 (하나/신한은행)';
       app.classList.add('mode-currency');
       currencyView.classList.add('active');
       updateCurrencyConverter();
@@ -249,12 +270,8 @@ document.addEventListener('DOMContentLoaded', () => {
       initUnitCategory(state.unitCategory);
     }
 
-    syncTabs();
     closeDrawer();
   }
-
-  tabCalculator.addEventListener('click', () => switchMode(lastCalcMode));
-  tabCurrency.addEventListener('click', () => switchMode('currency'));
 
   function openDrawer() {
     navDrawer.classList.add('open');
@@ -296,9 +313,7 @@ document.addEventListener('DOMContentLoaded', () => {
       display = parts.join('.');
     }
 
-    const shown = display || '0';
-    currentDisplayEl.textContent = shown;
-    currentDisplayEl.style.setProperty('--chars', String(Math.max(shown.length, 1)));
+    currentDisplayEl.textContent = display || '0';
   }
 
   function formatExpressionDisplay(rawExpr) {
@@ -716,18 +731,35 @@ document.addEventListener('DOMContentLoaded', () => {
   // 5. 은행별(하나/신한) 우대 환율 변환 시스템 & 양방향 직접 타이핑
   // =========================================================================
 
-  function getEffectiveRateInKRW(currencyCode) {
-    if (currencyCode === 'KRW') return 1;
-    const rate = state.liveRates && state.liveRates[currencyCode];
-    return rate > 0 ? rate : NaN;
+  function getEffectiveRateInKRW(currencyCode, bank, type, discount) {
+    if (currencyCode === 'KRW') return 1.0;
+
+    const bankData = state.bankRates[bank].rates[currencyCode];
+    const baseRate = bankData.base;
+    const targetTypeRate = bankData[type];
+
+    if (type === 'base' || discount === 0) {
+      return targetTypeRate;
+    }
+
+    const spread = targetTypeRate - baseRate;
+    const discountFactor = (100 - discount) / 100;
+    const discountedSpread = spread * discountFactor;
+
+    return baseRate + discountedSpread;
   }
 
   function convertBankCurrency(amount, fromCode, toCode) {
     if (isNaN(amount) || amount === 0) return 0;
-    const rateFrom = getEffectiveRateInKRW(fromCode);
-    const rateTo = getEffectiveRateInKRW(toCode);
-    if (!isFinite(rateFrom) || !isFinite(rateTo) || rateTo === 0) return NaN;
-    return (amount * rateFrom) / rateTo;
+    const bank = state.selectedBank;
+    const type = state.selectedRateType;
+    const discount = state.discountRate;
+
+    const rateFrom = getEffectiveRateInKRW(fromCode, bank, type, discount);
+    const amountInKRW = amount * rateFrom;
+
+    const rateTo = getEffectiveRateInKRW(toCode, bank, type, discount);
+    return amountInKRW / rateTo;
   }
 
   function formatCurrencyDisplay(val, code) {
@@ -738,55 +770,58 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function fitField(input) {
-    const len = Math.max(String(input.value || '').replace(/\s/g, '').length, 1);
-    input.style.setProperty('--chars', String(len));
-  }
-
   function updateCurrencyConverter() {
     const fromCode = state.fromCurrency;
     const toCode = state.toCurrency;
+    const bank = state.selectedBank;
+    const type = state.selectedRateType;
+    const discount = state.discountRate;
+
     const fromMeta = state.currencyMeta[fromCode];
     const toMeta = state.currencyMeta[toCode];
-    const hasRates = !!(state.liveRates && state.liveRates[fromCode] && state.liveRates[toCode]);
+    const bankInfo = state.bankRates[bank];
+
+    // 1. 은행 바로가기 링크 업데이트 (요청된 URL 완벽 반영)
+    bankDirectTitle.textContent = bankInfo.linkName;
+    bankDirectLink.href = bankInfo.linkUrl;
+    bankDirectLink.className = `bank-direct-link ${bank === 'hana' ? 'hana-link' : 'shinhan-link'}`;
+
+    // 2. 환율 요약 헤더 업데이트
+    const rateTypeNames = {
+      base: '매매기준율',
+      cashBuy: '현찰 살 때',
+      cashSell: '현찰 팔 때',
+      remitSend: '송금 보낼 때',
+      remitRecv: '송금 받을 때'
+    };
+
+    selectedRateSummary.textContent = `${bankInfo.name} · ${rateTypeNames[type]} (${discount}% 우대)`;
+    discountBadge.textContent = `${discount}% 우대`;
+    discountSaveInfo.textContent = discount > 0 ? `스프레드 ${discount}% 우대 할인 적용 중` : '우대율 미적용 (기본)';
 
     fromCurrencySymbol.textContent = fromMeta.symbol;
     toCurrencySymbol.textContent = toMeta.symbol;
 
     const rawFromVal = state.currencyInput;
-    const convertedToVal = hasRates ? convertBankCurrency(rawFromVal, fromCode, toCode) : NaN;
-    const fromText = formatCurrencyDisplay(rawFromVal, fromCode);
-    const toText = hasRates && isFinite(convertedToVal) ? formatCurrencyDisplay(convertedToVal, toCode) : '—';
+    const convertedToVal = convertBankCurrency(rawFromVal, fromCode, toCode);
 
     if (document.activeElement !== fromCurrencyInput) {
-      fromCurrencyInput.value = fromText;
+      fromCurrencyInput.value = formatCurrencyDisplay(rawFromVal, fromCode);
     }
     if (document.activeElement !== toCurrencyInput) {
-      toCurrencyInput.value = toText;
+      toCurrencyInput.value = formatCurrencyDisplay(convertedToVal, toCode);
     }
-    fitField(fromCurrencyInput);
-    fitField(toCurrencyInput);
 
-    fromCurrencyUnit.textContent = `${fromText} ${fromMeta.name}`;
-    toCurrencyUnit.textContent = hasRates && isFinite(convertedToVal)
-      ? `${toText} ${toMeta.name}`
-      : toMeta.name;
+    fromCurrencyUnit.textContent = `${formatCurrencyDisplay(rawFromVal, fromCode)} ${fromMeta.name}`;
+    toCurrencyUnit.textContent = `${formatCurrencyDisplay(convertedToVal, toCode)} ${toMeta.name}`;
 
-    if (hasRates) {
-      const singleRate = convertBankCurrency(1, fromCode, toCode);
-      const inverseRate = convertBankCurrency(1, toCode, fromCode);
-      const formatRate = (value) => {
-        if (!isFinite(value)) return '—';
-        if (value >= 100) return value.toLocaleString('ko-KR', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
-        if (value >= 1) return value.toFixed(2);
-        return value.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
-      };
-      exchangeRateDetail.textContent = `1 ${fromCode} = ${formatRate(singleRate)} ${toCode} · 1 ${toCode} = ${formatRate(inverseRate)} ${fromCode}`;
-      renderMultiCurrencyGrid(rawFromVal, fromCode);
-    } else {
-      exchangeRateDetail.textContent = '환율을 아직 불러오지 못했어요';
-      multiCurrencyGrid.innerHTML = '';
-    }
+    const singleRate = convertBankCurrency(1, fromCode, toCode);
+    const inverseRate = convertBankCurrency(1, toCode, fromCode);
+    const singleDec = toMeta.decimals > 0 ? toMeta.decimals : 2;
+    const invDec = fromMeta.decimals > 0 ? fromMeta.decimals : 2;
+    exchangeRateDetail.textContent = `1 ${fromCode} = ${singleRate.toFixed(singleDec)} ${toCode} · 1 ${toCode} = ${inverseRate.toFixed(invDec)} ${fromCode}`;
+
+    renderMultiCurrencyGrid(rawFromVal, fromCode);
   }
 
   function renderMultiCurrencyGrid(baseAmount, baseCode) {
@@ -853,7 +888,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const toVal = parseInputNumber(e.target.value);
     const calculatedFrom = convertBankCurrency(toVal, state.toCurrency, state.fromCurrency);
-    if (!isFinite(calculatedFrom)) return;
     state.currencyInput = calculatedFrom;
     updateCurrencyConverter();
   });
@@ -862,6 +896,44 @@ document.addEventListener('DOMContentLoaded', () => {
     state.activeCurrencySource = 'to';
     toCurrencyCard.classList.add('active-source');
     fromCurrencyCard.classList.remove('active-source');
+  });
+
+  bankTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      bankTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      state.selectedBank = tab.dataset.bank;
+      updateCurrencyConverter();
+    });
+  });
+
+  typeChips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      typeChips.forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      state.selectedRateType = chip.dataset.type;
+      updateCurrencyConverter();
+    });
+  });
+
+  discChips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      discChips.forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      const val = parseInt(chip.dataset.rate, 10);
+      state.discountRate = val;
+      discountSlider.value = val;
+      updateCurrencyConverter();
+    });
+  });
+
+  discountSlider.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value, 10);
+    state.discountRate = val;
+    discChips.forEach(c => {
+      c.classList.toggle('active', parseInt(c.dataset.rate, 10) === val);
+    });
+    updateCurrencyConverter();
   });
 
   fromCurrencySelect.addEventListener('change', (e) => {
@@ -1208,118 +1280,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  function formatBasis(timestamp) {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Asia/Seoul',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23'
-    }).formatToParts(new Date(timestamp));
-    const pick = (type) => parts.find((part) => part.type === type).value;
-    return `기준: ${pick('year')}.${pick('month')}.${pick('day')} ${pick('hour')}:${pick('minute')}`;
-  }
-
-  function readRateCache() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(RATE_CACHE_KEY) || 'null');
-      if (!saved || !saved.rates || !saved.updatedAt) return null;
-      if (!(saved.rates.USD > 0 && saved.rates.EUR > 0 && saved.rates.JPY > 0)) return null;
-      return saved;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  function applyRates(payload, isStale) {
-    state.liveRates = payload.rates;
-    state.rateUpdatedAt = payload.updatedAt;
-    state.rateIsStale = isStale;
-    const label = formatBasis(payload.updatedAt);
-    rateBasis.textContent = label;
-    drawerRateBasis.textContent = label;
-    rateError.hidden = !isStale;
-    try {
-      localStorage.setItem(RATE_CACHE_KEY, JSON.stringify({
-        rates: payload.rates,
-        updatedAt: payload.updatedAt
-      }));
-    } catch (error) {
-      /* 저장이 막혀도 이번 화면의 계산은 계속한다. */
-    }
-    updateCurrencyConverter();
-  }
-
-  async function fetchJson(url) {
-    const response = await fetch(url, { cache: 'no-store' });
-    if (!response.ok) throw new Error(String(response.status));
-    return response.json();
-  }
-
-  async function fetchLiveRates() {
-    try {
-      const data = await fetchJson('https://open.er-api.com/v6/latest/USD');
-      const table = data.rates;
-      if (data.result !== 'success' || !(table && table.KRW > 0 && table.EUR > 0 && table.JPY > 0)) {
-        throw new Error('incomplete');
-      }
-      return {
-        updatedAt: data.time_last_update_unix * 1000,
-        rates: {
-          USD: table.KRW,
-          EUR: table.KRW / table.EUR,
-          JPY: table.KRW / table.JPY,
-          KRW: 1
-        }
-      };
-    } catch (error) {
-      const data = await fetchJson('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json');
-      const usd = data.usd;
-      if (!usd || !(usd.krw > 0 && usd.eur > 0 && usd.jpy > 0)) throw new Error('incomplete');
-      return {
-        updatedAt: Date.parse(`${data.date}T00:00:00Z`),
-        rates: {
-          USD: usd.krw,
-          EUR: usd.krw / usd.eur,
-          JPY: usd.krw / usd.jpy,
-          KRW: 1
-        }
-      };
-    }
-  }
-
-  let rateRequest = 0;
-  async function loadRates() {
-    const requestId = ++rateRequest;
-    rateRefreshBtn.disabled = true;
-    rateBasis.textContent = '기준: 불러오는 중';
-    try {
-      const fresh = await fetchLiveRates();
-      if (requestId !== rateRequest) return;
-      applyRates(fresh, false);
-    } catch (error) {
-      if (requestId !== rateRequest) return;
-      const cached = readRateCache();
-      if (cached) {
-        applyRates(cached, true);
-      } else {
-        state.liveRates = null;
-        state.rateIsStale = true;
-        rateBasis.textContent = '기준: 없음';
-        drawerRateBasis.textContent = '기준: 없음';
-        rateError.hidden = false;
-        updateCurrencyConverter();
-      }
-    } finally {
-      if (requestId === rateRequest) rateRefreshBtn.disabled = false;
-    }
-  }
-
-  rateRefreshBtn.addEventListener('click', () => loadRates());
-
   // 초기 렌더링
   updateDisplay();
-  loadRates();
+  updateCurrencyConverter();
 });
