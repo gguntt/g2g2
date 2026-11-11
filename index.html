@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Windows 계산기</title>
   <link rel="stylesheet" href="style.css">
   <!-- Google Fonts -->
@@ -36,6 +36,11 @@
       </div>
     </header>
 
+    <div class="mode-tabs" role="tablist" aria-label="계산 종류">
+      <button type="button" class="mode-tab active" id="tabCalculator" role="tab" aria-selected="true">계산기</button>
+      <button type="button" class="mode-tab" id="tabCurrency" role="tab" aria-selected="false">환율</button>
+    </div>
+
     <!-- Navigation Drawer (Side Menu) -->
     <nav class="nav-drawer" id="navDrawer">
       <div class="drawer-header">
@@ -56,7 +61,7 @@
         <span class="group-label">변환기</span>
         <button class="drawer-item" data-mode="currency" id="navCurrency">
           <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1a7 7 0 1 0 7 7A7 7 0 0 0 8 1zm.5 11.5v-1.07a3.46 3.46 0 0 1-2.43-.91l.88-1.25a2.12 2.12 0 0 0 1.55.76c.72 0 1.25-.36 1.25-.94s-.48-.82-1.42-1.12C7 7.54 6 7 6 5.86c0-1.15.89-2 2.5-2.22V2.5h1v1.1c.78.11 1.48.45 2.05.95l-.83 1.29a2.38 2.38 0 0 0-1.22-.64c-.67 0-1.12.35-1.12.82 0 .5.44.75 1.34 1.05 1.45.47 2.48 1.07 2.48 2.29 0 1.27-.97 2.15-2.7 2.39v1.07z"/></svg>
-          <span>환율 (하나/신한 우대환율)</span>
+          <span>환율</span>
         </button>
         <button class="drawer-item" data-mode="unit" id="navUnit">
           <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M2 1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H2zm1 2h10v10H3V3zm2 2v2h2V5H5zm4 0v2h2V5H9zm-4 4v2h2V9H5zm4 0v2h2V9H9z"/></svg>
@@ -64,7 +69,7 @@
         </button>
       </div>
       <div class="drawer-footer">
-        <span class="date-badge">환율 기준일: 2026.09.15</span>
+        <span class="date-badge" id="drawerRateBasis">기준: 불러오는 중</span>
       </div>
     </nav>
     <div class="drawer-overlay" id="drawerOverlay"></div>
@@ -160,86 +165,12 @@
 
       <!-- 2. CURRENCY CONVERTER VIEW -->
       <section class="currency-view" id="currencyView">
-        <!-- Bank & Rate Selection Bar -->
-        <div class="currency-controls-card">
-          <!-- 1. Bank Selector Tabs -->
-          <div class="bank-selector-container">
-            <span class="control-label">은행 선택</span>
-            <div class="bank-tabs">
-              <button class="bank-tab active hana-theme" data-bank="hana" id="bankHana">
-                <span class="bank-indicator"></span>
-                <strong>하나은행</strong>
-              </button>
-              <button class="bank-tab shinhan-theme" data-bank="shinhan" id="bankShinhan">
-                <span class="bank-indicator"></span>
-                <strong>신한은행</strong>
-              </button>
-            </div>
+        <div class="rate-status">
+          <div class="rate-status-text">
+            <span id="rateBasis">기준: 불러오는 중</span>
+            <p id="rateError" class="rate-error" hidden>최신 환율을 불러오지 못했어요</p>
           </div>
-
-          <!-- Bank Exchange Direct Shortcut Button (정확한 공식 URL 적용) -->
-          <div class="bank-shortcut-box">
-            <a href="https://www.kebhana.com/cybrexh/index.do" target="_blank" rel="noopener noreferrer" class="bank-direct-link hana-link" id="bankDirectLink">
-              <span class="link-icon">🏦</span>
-              <span class="link-title" id="bankDirectTitle">하나은행 '환전지갑' 외화구매 바로가기</span>
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" class="external-icon"><path fill-rule="evenodd" d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5z"/><path fill-rule="evenodd" d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0v-5z"/></svg>
-            </a>
-          </div>
-
-          <!-- 2. Rate Type (5 Types) Selector -->
-          <div class="rate-type-container">
-            <span class="control-label">환율 기준</span>
-            <div class="rate-type-chips">
-              <button class="type-chip active" data-type="base">매매기준율</button>
-              <button class="type-chip" data-type="cashBuy">현찰 살 때</button>
-              <button class="type-chip" data-type="cashSell">현찰 팔 때</button>
-              <button class="type-chip" data-type="remitSend">송금 보낼 때</button>
-              <button class="type-chip" data-type="remitRecv">송금 받을 때</button>
-            </div>
-          </div>
-
-          <!-- 3. Exchange Rate Discount (우대율 10% ~ 90%) -->
-          <div class="discount-container" id="discountSection">
-            <div class="discount-header">
-              <div class="discount-title">
-                <span class="discount-icon" title="환율 우대 혜택">🏷️</span>
-                <span>환율 우대율 (Spread)</span>
-                <span class="discount-badge" id="discountBadge">90% 우대</span>
-              </div>
-              <span class="discount-save-text" id="discountSaveInfo">스프레드 90% 할인 적용</span>
-            </div>
-
-            <!-- Discount Quick Preset Chips -->
-            <div class="discount-preset-chips">
-              <button class="disc-chip" data-rate="0">0%</button>
-              <button class="disc-chip" data-rate="10">10%</button>
-              <button class="disc-chip" data-rate="30">30%</button>
-              <button class="disc-chip" data-rate="50">50%</button>
-              <button class="disc-chip" data-rate="70">70%</button>
-              <button class="disc-chip" data-rate="80">80%</button>
-              <button class="disc-chip active" data-rate="90">90%</button>
-            </div>
-
-            <!-- Interactive Slider -->
-            <div class="discount-slider-wrapper">
-              <input type="range" id="discountSlider" min="0" max="90" step="10" value="90" class="discount-range" aria-label="환율 우대율 조절">
-              <div class="slider-marks">
-                <span>0%</span>
-                <span>30%</span>
-                <span>50%</span>
-                <span>70%</span>
-                <span>90%</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="currency-header-info">
-          <div class="rate-date-tag">
-            <span class="pulse-dot"></span>
-            <strong>2026년 9월 15일</strong> 고시 환율 기준
-          </div>
-          <span class="selected-rate-summary" id="selectedRateSummary">하나은행 · 매매기준율 (90% 우대)</span>
+          <button type="button" id="rateRefreshBtn" class="rate-refresh">새로고침</button>
         </div>
 
         <!-- Primary Dual Converter Card -->
@@ -282,21 +213,21 @@
             </div>
             <div class="currency-input-row">
               <span class="currency-symbol" id="toCurrencySymbol">$</span>
-              <input type="text" id="toCurrencyInput" class="currency-input-field" value="7.22" inputmode="decimal" placeholder="0" autocomplete="off" aria-label="환산 외화 금액 직접 입력">
+              <input type="text" id="toCurrencyInput" class="currency-input-field" value="—" inputmode="decimal" placeholder="0" autocomplete="off" aria-label="환산 외화 금액 직접 입력">
             </div>
-            <div class="currency-unit-label" id="toCurrencyUnit">7.22 미국 달러</div>
+            <div class="currency-unit-label" id="toCurrencyUnit">미국 달러</div>
           </div>
         </div>
 
         <!-- Exchange Rate Formula Detail & Discount Info -->
         <div class="exchange-rate-detail" id="exchangeRateDetail">
-          1 KRW = 0.000722 USD (1 USD = 1,385.00 KRW)
+          환율을 불러오는 중
         </div>
 
         <!-- 4-Currency Multi-Comparison Board -->
         <div class="multi-currency-section">
           <div class="multi-currency-title">
-            <span>4대 통화 동시 비교 (우대 환율 실시간 연동)</span>
+            <span>4대 통화 동시 비교</span>
           </div>
           <div class="multi-currency-grid" id="multiCurrencyGrid">
             <!-- Dynamically populated cards for USD, EUR, JPY, KRW -->
